@@ -1,0 +1,11 @@
+database:
+  host: "localhost"
+  port: 5432
+  user: "admin"
+  password: "admin"
+  db_name: "etl_db"
+
+etl:
+  source_file: "data/sample_data.csv"
+  log_file: "logs/etl.log"
+  data_path: "data/sample_data.csv"
