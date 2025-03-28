@@ -1,16 +1,23 @@
-from sqlalchemy import Column, Integer, String, Float
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
+from sqlalchemy import Date, Float, Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-class MyTable(Base):
+class Base(DeclarativeBase):
+    """Base class for all ORM models."""
+
+    pass
+
+
+class Employees(Base):
+    """Defines the Employee model for storing employee-related data."""
+
     __tablename__ = "employees"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True) 
-    date_of_birth = Column(String)  
-    salary = Column(Float)  # Change String to Float for numeric salary
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    date_of_birth: Mapped[Date] = mapped_column(Date)
+    salary: Mapped[float] = mapped_column(Float)
 
-    def __repr__(self):
-        return f"<MyTable(id={self.id}, name={self.name}, date_of_birth={self.date_of_birth}, salary={self.salary})>"
+    def __repr__(self) -> str:
+        """Return a string representation of the Employees object."""
+        return f"<Employees(id={self.id}, name='{self.name}', date_of_birth='{self.date_of_birth}', salary={self.salary})>"
