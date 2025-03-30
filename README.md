@@ -45,7 +45,11 @@ etl_pipeline/
 - PostgreSQL 12+ (used in Dockerized environment)
 
 ### Dependencies
-
+**Create a virtual environment:**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+   ```
 The dependencies for this project are listed in `requirements.txt`. You can install them using:
 
 ```bash
