@@ -9,3 +9,4 @@ etl:
   source_file: "data/sample_data.csv"
   log_file: "logs/etl.log"
   data_path: "data/sample_data.csv"
+# we need to remove it or move it to .env file after evaluation is done.
