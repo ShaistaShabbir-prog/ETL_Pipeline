@@ -1,9 +1,9 @@
 database:
-  host: "localhost"
+  host: ""
   port: 5432
-  user: "admin"
-  password: "admin"
-  db_name: "etl_db"
+  user: ""
+  password: ""
+  db_name: ""
 
 etl:
   source_file: "data/sample_data.csv"
