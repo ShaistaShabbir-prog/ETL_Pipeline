@@ -1,57 +1,42 @@
 # dbt Transformation Layer
 
-Issue #11: SQL-based transformations with lineage tracking.
-
 ## Setup
-
 ```bash
-pip install dbt-core dbt-postgres
+pip install dbt-postgres
 dbt init etl_project
 ```
 
-## Project structure
+## Models
 
-```
-dbt_project/
-  models/
-    staging/
-      stg_source.sql        ← raw → cleaned
-    marts/
-      final_table.sql       ← business logic
-  tests/
-    not_null.yml            ← column-level tests
-    unique.yml              ← uniqueness checks
-  dbt_project.yml           ← project config
-```
-
-## Run
-
-```bash
-cd dbt_project
-dbt run          # execute transformations
-dbt test         # run data quality tests
-dbt docs generate && dbt docs serve   # view lineage
-```
-
-## Example staging model
-
+### staging/stg_source.sql
 ```sql
--- models/staging/stg_source.sql
+-- Clean and standardise raw source data
 SELECT
-  CAST(id AS INTEGER)           AS id,
-  LOWER(TRIM(email))            AS email,
-  CAST(age AS FLOAT)            AS age,
-  CAST(date AS DATE)            AS date,
-  CURRENT_TIMESTAMP             AS loaded_at
+  id::INTEGER                            AS id,
+  TRIM(LOWER(email))                     AS email,
+  NULLIF(age, '')::INTEGER               AS age,
+  TO_DATE(date_col, 'YYYY-MM-DD')        AS event_date,
+  CURRENT_TIMESTAMP                      AS loaded_at
 FROM {{ source('raw', 'source_table') }}
 WHERE id IS NOT NULL
-  AND age BETWEEN 0 AND 120
 ```
 
-## Tests (tests/not_null.yml)
+### marts/final_table.sql
+```sql
+-- Business-level aggregation
+SELECT
+  email,
+  COUNT(*)          AS event_count,
+  AVG(age)          AS avg_age,
+  MIN(event_date)   AS first_seen,
+  MAX(event_date)   AS last_seen
+FROM {{ ref('stg_source') }}
+GROUP BY email
+```
 
+## Tests (dbt test)
 ```yaml
-version: 2
+# models/schema.yml
 models:
   - name: stg_source
     columns:
@@ -59,4 +44,11 @@ models:
         tests: [not_null, unique]
       - name: email
         tests: [not_null]
+```
+
+## Run
+```bash
+dbt run      # execute all models
+dbt test     # run data tests
+dbt docs generate && dbt docs serve  # lineage docs
 ```
