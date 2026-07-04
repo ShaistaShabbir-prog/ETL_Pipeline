@@ -1,75 +1,129 @@
 """
-Issue #5: Apache Airflow DAG for scheduled ETL pipeline runs.
-Schedule: daily at 02:00 UTC.
+dags/etl_pipeline_dag.py
+
+Apache Airflow DAG for the ETL pipeline.
+Orchestrates: Extract → Validate → Transform → Load → Notify
+
+Setup:
+  1. pip install apache-airflow
+  2. export AIRFLOW_HOME=./airflow
+  3. airflow db init
+  4. airflow scheduler &
+  5. airflow webserver -p 8080
 """
-from __future__ import annotations
 from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.operators.email import EmailOperator
+from airflow.utils.trigger_rule import TriggerRule
+import logging
 
-try:
-    from airflow import DAG
-    from airflow.operators.python import PythonOperator
-    HAS_AIRFLOW = True
-except ImportError:
-    HAS_AIRFLOW = False
-    print("airflow not installed — DAG definition skipped. pip install apache-airflow")
+logger = logging.getLogger(__name__)
 
+# ── Default args ─────────────────────────────────────────────
+default_args = {
+    "owner": "shaista",
+    "depends_on_past": False,
+    "start_date": datetime(2025, 1, 1),
+    "email_on_failure": True,
+    "email_on_retry": False,
+    "retries": 3,
+    "retry_delay": timedelta(minutes=5),
+    "retry_exponential_backoff": True,
+}
 
-def run_extract(**ctx):
-    """Extract step — pulls from source CSV."""
-    import pandas as pd, os
-    src = os.getenv("SOURCE_CSV", "data/raw/source.csv")
-    df  = pd.read_csv(src)
-    ctx["ti"].xcom_push(key="row_count", value=len(df))
-    df.to_parquet("/tmp/etl_extract.parquet", index=False)
-    print(f"Extracted {len(df)} rows from {src}")
-
-
-def run_transform(**ctx):
-    """Transform step — clean, validate, deduplicate."""
-    import pandas as pd
-    df = pd.read_parquet("/tmp/etl_extract.parquet")
-    before = len(df)
-    df = df.dropna(thresh=int(len(df.columns) * 0.7))   # drop rows >30% null
-    df = df.drop_duplicates()
-    df.to_parquet("/tmp/etl_transform.parquet", index=False)
-    print(f"Transform: {before} → {len(df)} rows ({before-len(df)} removed)")
-
-
-def run_load(**ctx):
-    """Load step — upsert to PostgreSQL."""
-    import pandas as pd
-    df = pd.read_parquet("/tmp/etl_transform.parquet")
-    print(f"Load: {len(df)} rows → PostgreSQL")
-    # Real implementation: use psycopg2 upsert_rows()
+# ── Task functions ────────────────────────────────────────────
+def extract(**context):
+    """Extract data from source (CSV / API / DB)."""
+    from etl_pipeline.extract import run_extraction
+    logger.info("Starting extraction...")
+    result = run_extraction()
+    context["ti"].xcom_push(key="row_count", value=result["rows"])
+    logger.info(f"Extracted {result['rows']:,} rows")
+    return result["output_path"]
 
 
-def run_profile(**ctx):
-    """Profile step — generate data quality report."""
-    import pandas as pd
-    df = pd.read_parquet("/tmp/etl_transform.parquet")
-    from etl_pipeline.profiling import generate_profile
-    path = generate_profile(df, output_dir="reports/")
-    print(f"Profile saved: {path}")
+def validate(**context):
+    """Run Great Expectations data quality suite."""
+    import subprocess, sys
+    csv_path = context["ti"].xcom_pull(task_ids="extract")
+    result = subprocess.run(
+        [sys.executable, "etl_pipeline/data_quality/expectations_suite.py", "--csv", csv_path],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise ValueError(f"Data quality validation failed:\n{result.stdout}\n{result.stderr}")
+    logger.info("Data quality: PASSED")
+    return csv_path
 
 
-if HAS_AIRFLOW:
-    with DAG(
-        dag_id="etl_pipeline",
-        description="Daily ETL pipeline — extract, transform, load, profile",
-        schedule_interval="0 2 * * *",
-        start_date=datetime(2025, 1, 1),
-        catchup=False,
-        default_args={
-            "owner": "data-team",
-            "retries": 2,
-            "retry_delay": timedelta(minutes=5),
-            "email_on_failure": False,
-        },
-        tags=["etl", "daily"],
-    ) as dag:
-        extract   = PythonOperator(task_id="extract",   python_callable=run_extract)
-        transform = PythonOperator(task_id="transform", python_callable=run_transform)
-        load      = PythonOperator(task_id="load",      python_callable=run_load)
-        profile   = PythonOperator(task_id="profile",   python_callable=run_profile)
+def transform(**context):
+    """Clean, normalize, and enrich the data."""
+    from etl_pipeline.transform import run_transformation
+    csv_path = context["ti"].xcom_pull(task_ids="validate")
+    logger.info("Starting transformation...")
+    output = run_transformation(csv_path)
+    logger.info(f"Transformed → {output}")
+    return output
 
-        extract >> transform >> load >> profile
+
+def load(**context):
+    """Load validated, transformed data into PostgreSQL."""
+    from etl_pipeline.load import run_load
+    transformed_path = context["ti"].xcom_pull(task_ids="transform")
+    logger.info("Starting load...")
+    rows_loaded = run_load(transformed_path)
+    logger.info(f"Loaded {rows_loaded:,} rows into database")
+    return rows_loaded
+
+
+def on_failure_callback(context):
+    logger.error(f"Task {context['task_instance_key_str']} FAILED: {context['exception']}")
+
+
+# ── DAG definition ────────────────────────────────────────────
+with DAG(
+    dag_id="etl_pipeline",
+    default_args=default_args,
+    description="ETL pipeline: Extract → Validate (GX) → Transform → Load",
+    schedule_interval="0 6 * * *",   # daily at 06:00 UTC
+    catchup=False,
+    tags=["etl", "data-quality", "production"],
+) as dag:
+
+    t_extract = PythonOperator(
+        task_id="extract",
+        python_callable=extract,
+        on_failure_callback=on_failure_callback,
+    )
+
+    t_validate = PythonOperator(
+        task_id="validate",
+        python_callable=validate,
+        on_failure_callback=on_failure_callback,
+    )
+
+    t_transform = PythonOperator(
+        task_id="transform",
+        python_callable=transform,
+        on_failure_callback=on_failure_callback,
+    )
+
+    t_load = PythonOperator(
+        task_id="load",
+        python_callable=load,
+        on_failure_callback=on_failure_callback,
+    )
+
+    t_notify_success = EmailOperator(
+        task_id="notify_success",
+        to="shaista.s.shabbir@gmail.com",
+        subject="✅ ETL Pipeline Completed",
+        html_content="""<h2>ETL Pipeline Success</h2>
+        <p>Date: {{ ds }}<br>
+        Rows extracted: {{ ti.xcom_pull(task_ids=\'extract\', key=\'row_count\') }}</p>""",
+        trigger_rule=TriggerRule.ALL_SUCCESS,
+    )
+
+    # Pipeline order
+    t_extract >> t_validate >> t_transform >> t_load >> t_notify_success
