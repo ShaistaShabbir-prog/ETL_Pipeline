@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Raw data loaded from extraction step"
+    tables:
+      - name: events
+        description: "Raw event records from scraping pipeline"
+        columns:
+          - name: id
+            description: "Unique event identifier"
+            tests: [unique, not_null]
+          - name: event_type
+            description: "Category of civil event"
+            tests: [not_null]
+          - name: event_date
+            description: "Date of the event"
+            tests: [not_null]
+
+models:
+  - name: stg_events
+    description: "Cleaned and normalized event records"
+    columns:
+      - name: event_id
+        description: "Unique event identifier (cast to string)"
+        tests: [unique, not_null]
+
+  - name: mart_event_summary
+    description: "Monthly event aggregation by type — used for dashboards"
+    columns:
+      - name: event_type
+        tests: [not_null]
+      - name: month
+        tests: [not_null]
+      - name: event_count
+        tests: [not_null]
