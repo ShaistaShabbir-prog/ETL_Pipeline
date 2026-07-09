@@ -1,133 +1,137 @@
-# ETL Pipeline with Data Quality Controls
+# ETL Pipeline
 
-This project implements an ETL (Extract, Transform, Load) pipeline with data quality controls using Python. The pipeline extracts data from a CSV file, transforms it by cleaning and validating it, and loads it into a PostgreSQL database. Additionally, it includes logging and error handling to ensure data integrity.
+A production-quality ETL pipeline with **data quality validation** (Great Expectations), **orchestration** (Apache Airflow), and **transformation** (dbt).
+
+[![CI](https://github.com/ShaistaShabbir-prog/ETL_Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/ShaistaShabbir-prog/ETL_Pipeline/actions)
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Apache Airflow DAG                    │
+│                                                          │
+│  [Extract] → [Validate (GX)] → [Transform (dbt)] → [Load] → [Notify]
+│     ↓              ↓                 ↓               ↓
+│   CSV/API    GX Expectations     SQL models      PostgreSQL
+│   sources    (schema, nulls,     (staging +      (or any DB)
+│              uniqueness)          marts)                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Orchestration | Apache Airflow | DAG scheduling, retries, monitoring |
+| Data Quality | Great Expectations | Schema, null, range, uniqueness checks |
+| Transformation | dbt | SQL models, tests, data lineage |
+| Storage | PostgreSQL | Output data warehouse |
+| Language | Python 3.11 | Extract + load scripts |
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone and install
+git clone https://github.com/ShaistaShabbir-prog/ETL_Pipeline.git
+cd ETL_Pipeline
+pip install -r requirements.txt
+
+# 2. Run data quality check on sample data
+python etl_pipeline/data_quality/expectations_suite.py --csv data/sample_events.csv
+
+# 3. Run Airflow locally (optional)
+export AIRFLOW_HOME=$(pwd)/airflow
+airflow db init
+airflow scheduler &
+airflow webserver -p 8080 &
+# Open http://localhost:8080 — trigger dag 'etl_pipeline'
+
+# 4. Run dbt models (requires PostgreSQL)
+cd dbt_project
+dbt run
+dbt test
+```
+
+---
 
 ## Project Structure
 
 ```
-etl_pipeline/
-│── data/                     # Sample input CSV files
-│── logs/                     # Log files
-│── config/                   # Configuration files
-│   ├── config.yaml           # Database and ETL settings
-│── src/                      # Main source code
-│   ├── __init__.py           # Package initializer
-│   ├── extract.py            # Extraction logic
-│   ├── transform.py          # Data cleaning & transformation logic
-│   ├── load.py               # Database loading logic
-│   ├── database.py           # DB connection utilities
-│   ├── logging_config.py     # Logging setup
-│   ├── main.py               # Main ETL runner
-│── tests/                    # Unit tests
-│── Dockerfile                # Docker setup for the Python application
-│── docker-compose.yml        # PostgreSQL container setup
-│── requirements.txt          # Dependencies
-│── README.md                 # Setup and usage instructions
-│── .env                      # Environment variables (e.g., DB credentials)
+ETL_Pipeline/
+├── dags/
+│   └── etl_pipeline_dag.py     ← Airflow DAG (Extract→Validate→Transform→Load)
+├── data/
+│   └── sample_events.csv       ← Sample input data for testing
+├── dbt_project/
+│   ├── models/
+│   │   ├── staging/stg_events.sql    ← Clean + normalize raw data
+│   │   └── marts/mart_event_summary.sql ← Business aggregations
+│   └── schema.yml              ← dbt source + model tests
+├── etl_pipeline/
+│   ├── data_quality/
+│   │   └── expectations_suite.py  ← Great Expectations validation
+│   ├── extract.py              ← Data extraction (CSV/API)
+│   ├── transform.py            ← Business logic transformations
+│   └── load.py                 ← Database loading
+└── requirements.txt
 ```
 
-## Features
+---
 
-- **Data Extraction**: Extracts data from a CSV file.
-- **Data Transformation**:
-  - Standardizes date formats.
-  - Handles missing values.
-  - Removes duplicate records.
-  - Validates data types (e.g., ensures numeric fields contain only numbers).
-- **Data Loading**: Loads the cleaned data into a PostgreSQL database.
-- **Data Quality Controls**: Logs any inconsistencies or errors during the extraction, transformation, and loading processes.
-- **Dockerized Setup**: Includes a `docker-compose.yml` file to spin up a PostgreSQL instance for testing.
+## Data Quality Checks (Great Expectations)
 
-## Requirements
+The pipeline validates data **before loading** using these checks:
 
-- Python 3.x
-- Docker (for running PostgreSQL container)
-- PostgreSQL 12+ (used in Dockerized environment)
-
-### Dependencies
-**Create a virtual environment:**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
-   ```
-The dependencies for this project are listed in `requirements.txt`. You can install them using:
+| Check | What it validates |
+|---|---|
+| Schema | Column names match expected schema |
+| Not null | All required columns have values (95%+ non-null) |
+| Uniqueness | Primary key column has no duplicates |
+| Type check | Numeric columns contain numbers |
+| String check | Text columns are not blank/whitespace |
 
 ```bash
-pip install -r requirements.txt
+# Run manually
+python etl_pipeline/data_quality/expectations_suite.py --csv your_data.csv
 ```
 
-### Docker Setup
+---
 
-This project uses Docker to spin up a PostgreSQL database container. Follow these steps to set it up:
+## Airflow DAG
 
-1. **Build and Start the Docker Containers**:
+The DAG runs daily at 06:00 UTC with 3 retries (exponential backoff):
 
-   ```bash
-   docker-compose up --build
-   ```
-
-   This will:
-   - Build the Docker image for the Python application.
-   - Start the PostgreSQL container with the appropriate environment variables.
-
-2. **Verify the Database Connection**:
-
-   ```bash
-   docker exec -it etl_postgres psql -U admin -d etl_db
-   ```
-
-   This will open a `psql` session connected to the `etl_db` database.
-
-## Configuration
-
-You need to configure the database connection details in `config/config.yaml`:
-
-```yaml
-database:
-  user: admin
-  password: yourpassword
-  host: localhost
-  port: 5432
-  db_name: etl_db
-
-etl:
-  data:
-    sample_data.csv: "data/sample_data.csv"
+```
+extract → validate (GX) → transform → load → notify_success
 ```
 
-Make sure the file `data/sample_data.csv` exists in the `data` directory and contains the sample data for testing.
+Each task logs to Airflow's UI with full error context.
 
-## Running the ETL Pipeline
+---
 
-To run the ETL pipeline, execute the following command:
+## dbt Models
 
-```bash
-python src/main.py
-```
+| Model | Type | Description |
+|---|---|---|
+| `stg_events` | View | Clean + normalize raw events (type cast, trim, filter nulls) |
+| `mart_event_summary` | Table | Monthly aggregation by event type + cumulative counts |
 
-### Logging
+Run tests: `dbt test` — checks uniqueness and not-null on all key columns.
 
-Logs for the ETL process are stored in the `logs/` directory. You can inspect the logs to monitor the process and check for any errors.
+---
 
-## Testing
+## Research Context
 
-Unit tests are located in the `tests/` directory. To run the tests, use:
+This pipeline was built as part of the **A.L.E.R.T** research project (civil event detection for Hamburg). It processes ~19,444 social media records through extraction, quality validation, and aggregation.
 
-```bash
-pytest
-```
+**Related:** [EventDetectionAndEventExtraction](https://github.com/ShaistaShabbir-prog/EventDetectionAndEventExtraction)
 
-## Assumptions
+---
 
-- The CSV file (`sample_data.csv`) is assumed to have columns that are validated in the ETL process.
-- The PostgreSQL instance is set up with the credentials provided in `config/config.yaml`.
+## Author
 
-## Notes
-
-- Make sure that you have the required Python version and Docker installed to run this project smoothly.
-- Ensure that the `sample_data.csv` file is correctly formatted as expected by the script.
-
-## License
-
-This project is licensed under the Apache License - see the [LICENSE](LICENSE) file for details.
-
+**Shaista Shabbir** — Research Associate, TU Dortmund University · Lamarr Institute for ML & AI
