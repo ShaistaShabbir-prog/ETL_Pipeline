@@ -1,6 +1,33 @@
-pandas
-psycopg2-binary
-SQLAlchemy
-pyyaml
-python-dotenv
-loguru
+# ETL Pipeline — Requirements
+# pip install -r requirements.txt
+
+# Core data
+pandas>=2.2.0
+numpy>=1.26.0
+
+# dbt (data transformation)
+dbt-core>=1.8.0
+dbt-duckdb>=1.8.0  # lightweight local warehouse; swap for dbt-postgres in prod
+
+# Great Expectations (data quality)
+great-expectations>=0.18.0
+
+# Airflow (orchestration) — install separately for local dev:
+# pip install apache-airflow  (heavy — use virtualenv)
+
+# Database
+psycopg2-binary>=2.9.9  # PostgreSQL
+sqlalchemy>=2.0.30
+duckdb>=0.10.0
+
+# API / REST sources
+requests>=2.32.0
+feedparser>=6.0.11  # RSS feeds (GDACS)
+
+# Utils
+python-dotenv>=1.0.1
+pyyaml>=6.0.1
+
+# Testing
+pytest>=8.2.0
+pytest-cov>=5.0.0
